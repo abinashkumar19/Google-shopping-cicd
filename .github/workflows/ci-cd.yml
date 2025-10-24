@@ -1,4 +1,4 @@
-name: "CI/CD — ECR Auto Image + EKS Deploy"
+name: "CI/CD"
 
 on:
   push:
