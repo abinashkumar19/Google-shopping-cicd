@@ -1,57 +1,65 @@
-name: CI/CD — ECR Auto Image + EKS Deploy
-steps:
-- name: Checkout code
-uses: actions/checkout@v4
+name: "CI/CD — ECR Auto Image + EKS Deploy"
 
+on:
+  push:
+    branches:
+      - main
 
-- name: Configure AWS credentials
-uses: aws-actions/configure-aws-credentials@v4
-with:
-aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-aws-region: ${{ env.AWS_REGION }}
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: google-store
+  CLUSTER_NAME: my-eks-cluster
+  DEPLOYMENT_FILE: kubernetes/deployment.yml
 
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
 
-- name: Login to Amazon ECR
-id: login-ecr
-uses: aws-actions/amazon-ecr-login@v2
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-- name: Create ECR repo if missing
-run: |
-aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
-aws ecr create-repository --repository-name $ECR_REPOSITORY --region $AWS_REGION
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Create ECR repo if missing
+        run: |
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
+          aws ecr create-repository --repository-name $ECR_REPOSITORY --region $AWS_REGION
 
-- name: Build and push Docker image
-run: |
-cd app
-IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
-docker build -t $IMAGE_URI .
-docker push $IMAGE_URI
-echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+      - name: Build and push Docker image
+        run: |
+          cd app
+          IMAGE_TAG=$(date +%Y%m%d%H%M%S)
+          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+          docker build -t $IMAGE_URI .
+          docker push $IMAGE_URI
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
+      - name: Update deployment YAML with new image
+        run: |
+          sed -i "s#image: .*#image: $IMAGE_URI#g" $DEPLOYMENT_FILE
 
-- name: Update deployment YAML with new image
-run: |
-sed -i "s#image: .*#image: $IMAGE_URI#g" $DEPLOYMENT_FILE
+      - name: Commit updated YAML
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions@github.com"
+          git add $DEPLOYMENT_FILE
+          git commit -m "Auto-update image: $IMAGE_URI" || echo "No changes to commit"
+          git push
 
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
 
-- name: Commit updated YAML
-run: |
-git config user.name "github-actions[bot]"
-git config user.email "github-actions@github.com"
-git add $DEPLOYMENT_FILE
-git commit -m "Auto-update image: $IMAGE_URI"
-git push
-
-
-- name: Update kubeconfig
-run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
-
-
-- name: Deploy to EKS
-run: |
-kubectl apply -f kubernetes/deployment.yml
-kubectl apply -f kubernetes/service.yml
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f kubernetes/deployment.yml
+          kubectl apply -f kubernetes/service.yml
