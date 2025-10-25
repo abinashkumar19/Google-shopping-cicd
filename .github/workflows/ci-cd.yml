@@ -8,6 +8,8 @@ on:
 env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: google-shopping
+  DEPLOYMENT_FILE: k8s/deployment.yaml
+  SERVICE_FILE: k8s/service.yaml
   EC2_USER: ec2-user
 
 jobs:
@@ -15,21 +17,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: ✅ Checkout repository
+      - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Configure AWS Credentials
+      - name: ⚙️ Set up AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔐 Decode and save EC2 SSH key
+      - name: 🔑 Decode and save SSH key
         run: |
           echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
           chmod 600 ec2-key.pem
-          ls -l ec2-key.pem
 
       - name: 🐳 Build & Push Docker image to ECR
         run: |
@@ -37,19 +38,16 @@ jobs:
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-          echo "🔹 Building image: $IMAGE_URI"
+          echo "🧩 Image URI: $IMAGE_URI"
 
-          # Create ECR repo if not present
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
 
           docker build -t $IMAGE_URI .
-          aws ecr get-login-password --region $AWS_REGION | \
-            docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
           docker push $IMAGE_URI
 
           echo $IMAGE_URI > image_uri.txt
-          cat image_uri.txt
 
       - name: 🚀 Deploy to EC2 and Apply Kubernetes
         env:
@@ -70,30 +68,34 @@ jobs:
             DEPLOY_FILE="\$APP_DIR/k8s/deployment.yaml"
             SERVICE_FILE="\$APP_DIR/k8s/service.yaml"
 
-            # Ensure app directory exists
             mkdir -p \$APP_DIR
 
-            # Clone or pull repo
             if [ ! -d "\$APP_DIR/.git" ]; then
               echo "📦 Cloning application repository..."
-              git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git \$APP_DIR
+              git clone https://github.com/abinashkumar/Google-shopping-cicd.git \$APP_DIR
             else
               echo "🔄 Pulling latest changes..."
               cd \$APP_DIR && git pull origin main
             fi
 
-            # Check for deployment file
+            cd \$APP_DIR
+
+            echo "🧪 Checking if kubectl exists..."
+            if ! command -v kubectl &> /dev/null; then
+              echo "⚙️ Installing kubectl..."
+              curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+              chmod +x kubectl && mv kubectl /usr/local/bin/
+            fi
+
             if [ ! -f "\$DEPLOY_FILE" ]; then
-              echo "❌ Deployment YAML not found! Checking current directory..."
+              echo "❌ Deployment YAML not found! Checking structure..."
               ls -R \$APP_DIR
               exit 1
             fi
 
-            # Update image in deployment YAML
             echo "📝 Updating image in deployment YAML..."
             sed -i "s|image: .*|image: \${IMAGE_URI}|g" \$DEPLOY_FILE
 
-            # Apply to Kubernetes
             echo "⚙️ Applying Kubernetes manifests..."
             kubectl apply -f \$DEPLOY_FILE
             kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
