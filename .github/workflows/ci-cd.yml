@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  AWS_REGION: ap-south-1
+  AWS_REGION: ca-central-1      # Correct region
   ECR_REPOSITORY: google-shopping
   DEPLOYMENT_FILE: k8s/deployment.yml
   SERVICE_FILE: k8s/service.yml
@@ -21,14 +21,14 @@ jobs:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Configure AWS CLI
+      - name: ⚙️ Set up AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔑 Decode SSH key
+      - name: 🔑 Decode and save SSH key
         run: |
           echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
           chmod 600 ec2-key.pem
@@ -63,41 +63,33 @@ jobs:
             echo "✅ Connected to EC2 instance"
 
             IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼  Using image: $IMAGE_URI"
+            echo "🖼  Using image: \$IMAGE_URI"
 
             APP_DIR="/home/ec2-user/app"
-            mkdir -p $APP_DIR
+            DEPLOY_FILE="\$APP_DIR/k8s/deployment.yml"
+            SERVICE_FILE="\$APP_DIR/k8s/service.yml"
 
-            if [ ! -d "$APP_DIR/.git" ]; then
+            mkdir -p \$APP_DIR
+
+            if [ ! -d "\$APP_DIR/.git" ]; then
               echo "📦 Cloning application repository..."
-              git clone https://github.com/abinashkumar19/Google-shopping-cicd.git $APP_DIR
+              git clone https://github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
             else
               echo "🔄 Pulling latest changes..."
-              cd $APP_DIR && git reset --hard && git pull origin main
+              cd \$APP_DIR && git reset --hard && git clean -fd && git pull origin main
             fi
 
-            cd $APP_DIR
+            cd \$APP_DIR
 
-            # Update image in deployment YAML
-            DEPLOY_FILE="$APP_DIR/k8s/deployment.yml"
-            SERVICE_FILE="$APP_DIR/k8s/service.yml"
+            echo "📝 Updating deployment image..."
+            sed -i "s|image: .*|image: \${IMAGE_URI}|g" \$DEPLOY_FILE
 
-            if [ ! -f "$DEPLOY_FILE" ]; then
-              echo "❌ Deployment YAML not found!"
-              exit 1
-            fi
+            echo "⚙️ Configuring kubectl for EKS..."
+            aws eks update-kubeconfig --region ca-central-1 --name kube
 
-            echo "📝 Updating image in deployment YAML..."
-            sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOY_FILE
-
-            # Configure kubectl for EKS
-            echo "⚙️ Configuring kubectl for EKS cluster..."
-            aws eks update-kubeconfig --region ap-south-1 --name kube
-
-            # Apply manifests
             echo "⚙️ Applying Kubernetes manifests..."
-            kubectl apply -f $DEPLOY_FILE
-            kubectl apply -f $SERVICE_FILE || echo "⚠️ Service file missing, skipped."
+            kubectl apply -f \$DEPLOY_FILE
+            kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
 
             echo "🚀 Deployment completed successfully!"
           EOF
