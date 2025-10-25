@@ -11,70 +11,83 @@ env:
   DEPLOYMENT_FILE: k8s/deployment.yaml
   SERVICE_FILE: k8s/service.yaml
   EC2_USER: ec2-user
-  EC2_HOST: ec2-16-52-161-62.ap-south-1.compute.amazonaws.com   # ✅ Fixed line
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: ✅ Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up AWS CLI
+      - name: ⚙️ Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Decode and save SSH key
+      - name: 🔐 Decode and save EC2 SSH key
         run: |
           echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
           chmod 600 ec2-key.pem
+          ls -l ec2-key.pem
 
-      - name: Build & Push Docker image
+      - name: 🐳 Build & Push Docker image to ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-          # Create repo if missing
+          echo "🔹 Building image: $IMAGE_URI"
+
+          # Create ECR repo if it doesn't exist
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
 
-          # Build and push Docker image
           docker build -t $IMAGE_URI .
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION | \
+            docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
           docker push $IMAGE_URI
 
           echo $IMAGE_URI > image_uri.txt
+          cat image_uri.txt
 
-      - name: SSH to EC2 and Deploy
+      - name: 🚀 Deploy to EC2 and Apply Kubernetes Manifests
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}   # ✅ Load EC2 host from GitHub Secrets
         run: |
-          echo "📤 Copying image URI to EC2..."
+          echo "📤 Copying image URI file to EC2..."
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
 
-          echo "💻 Connecting to EC2 and deploying..."
+          echo "💻 Connecting to EC2..."
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
             set -e
             echo "✅ Connected to EC2 instance"
-
+            
             IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
+            echo "🖼  Using image: \$IMAGE_URI"
 
-            # Ensure app directory exists
+            # Clone or update app repo
             if [ ! -d "/home/ec2-user/app" ]; then
+              echo "📦 Cloning app repository..."
               git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git /home/ec2-user/app
+            else
+              echo "🔄 Updating existing repository..."
+              cd /home/ec2-user/app
+              git pull origin main
             fi
 
             cd /home/ec2-user/app
 
-            # Update Kubernetes manifest with new image
-            sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOYMENT_FILE
+            # Update image in deployment file
+            echo "📝 Updating image in deployment YAML..."
+            sed -i "s|image: .*|image: \${IMAGE_URI}|g" \$DEPLOYMENT_FILE
 
-            # Apply manifests
-            kubectl apply -f $DEPLOYMENT_FILE
-            kubectl apply -f $SERVICE_FILE
+            # Apply Kubernetes manifests
+            echo "⚙️ Applying Kubernetes manifests..."
+            kubectl apply -f \$DEPLOYMENT_FILE
+            kubectl apply -f \$SERVICE_FILE
 
-            echo "🚀 Deployment complete"
+            echo "🚀 Deployment completed successfully!"
           EOF
