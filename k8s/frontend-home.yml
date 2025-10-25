@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-home
+  labels:
+    app: frontend-home
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-home
+  template:
+    metadata:
+      labels:
+        app: frontend-home
+    spec:
+      containers:
+        - name: frontend-home
+          image: REPLACE_IMAGE_URI_HOME
+          ports:
+            - containerPort: 80
