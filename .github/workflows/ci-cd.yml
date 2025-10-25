@@ -66,6 +66,7 @@ jobs:
             DEPLOY_DIR="$APP_DIR/k8s"
             mkdir -p $APP_DIR
 
+            # Clone or pull repository
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "📦 Cloning application repository..."
               git clone https://github.com/abinashkumar19/Google-shopping-cicd.git $APP_DIR
@@ -76,7 +77,8 @@ jobs:
 
             cd $DEPLOY_DIR
 
-            echo "📝 Updating images in deployments..."
+            # Update images in all deployments
+            echo "📝 Updating images in all deployment YAMLs..."
             for deploy_file in *-deployment.yml; do
               sed -i "s|image: .*|image: ${IMAGE_URI}|g" $deploy_file
             done
@@ -84,7 +86,7 @@ jobs:
             echo "⚙️ Configuring kubectl for EKS..."
             aws eks update-kubeconfig --region ca-central-1 --name kube
 
-            echo "⚙️ Applying Kubernetes manifests..."
+            echo "⚙️ Applying all Kubernetes manifests..."
             for yaml_file in *-deployment.yml *-service.yml *-hpa.yml; do
               kubectl apply -f $yaml_file || echo "⚠️ Failed to apply $yaml_file"
             done
