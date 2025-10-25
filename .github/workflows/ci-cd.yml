@@ -4,93 +4,77 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
-
-env:
-  AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  ECR_REPOSITORY: google-shopping-repo
-  CLUSTER_NAME: google-shopping-cluster
-  DEPLOYMENT_FILE: k8s/deployment.yml
-  EC2_USER: ${{ secrets.EC2_USER }}
-  EC2_HOST: ${{ secrets.EC2_HOST }}
 
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+      ECR_REPOSITORY: google-shopping-repo
+      CLUSTER_NAME: my-k8s-cluster
+      DEPLOYMENT_FILE: k8s/deployment.yml
+      SERVICE_FILE: k8s/service.yml
+      EC2_USER: ec2-user
+      EC2_HOST: <YOUR_EC2_PUBLIC_IP>   # replace with your EC2 public IP
+      ACCOUNT_ID: <YOUR_AWS_ACCOUNT_ID> # replace with your AWS account ID
 
     steps:
-      - name: 🧩 Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: 🔑 Setup SSH Key (Base64)
+      - name: Install Dependencies
         run: |
-          echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 --decode > ec2-key.pem
+          sudo apt-get update
+          sudo apt-get install -y docker.io awscli git
+
+      - name: Write SSH Key
+        run: |
+          cat > ec2-key.pem << 'EOF'
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEAtJYQFbVo2i4Ffy/583GIwb2gMwn7bWkVUnOLa30wcUoXt3uj
+xlae/d80ivFuXc1ZQEipLf0l6iJm9isQE6BX5sfHOOSr0J3YaK0JeRmo/2v5qDJ9
+JA+/KlH/pOXfwk7wt2/XJurIJcFpZb02S836dJNoDDkapIqOycxrvaoxkTSjhDX
+dVFCTtiBf/ANz93b8pegrIuyO9IJGzNr18XifCuzcu/zR4P6mBDokuUS8zHcBXao
+2um9NE6UTBTIw46p9tjIWsfRRreecBwBcgdusRoNfyRv69Qbcya5iDF5CvHsOokC
+JDBfv3CB3s6GGh3n4M2vZIN0sqlr4odSZ1hhsQIDAQABAoIBADr00wODWlwAsmK3
+...
+-----END RSA PRIVATE KEY-----
+EOF
           chmod 700 ec2-key.pem
-          ssh-keygen -l -f ec2-key.pem >/dev/null 2>&1 || echo "✅ SSH key loaded"
+          echo "✅ SSH key created"
 
-      - name: 📦 Build Frontend
+      - name: Test SSH Connection
         run: |
-          echo "Building frontend..."
-          # npm install && npm run build   # Uncomment if you use Node build
-          ls -la
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "echo Connected successfully"
 
-      - name: 🚀 Build & Push Docker Image on EC2
+      - name: Build Docker Image & Push to ECR, Deploy to Kubernetes
         run: |
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'EOF'
             set -e
+
             echo "✅ Connected to EC2"
 
+            # Install Docker & AWS CLI if missing
             sudo yum install -y docker awscli git || true
             sudo service docker start
 
-            ACCOUNT_ID=${{ env.AWS_ACCOUNT_ID }}
-            REGION=${{ env.AWS_REGION }}
-            REPO=${{ env.ECR_REPOSITORY }}
+            # Login to ECR
+            aws ecr get-login-password --region $AWS_REGION | sudo docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+            # Clone repo and build Docker image
+            git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git /tmp/build || true
+            cd /tmp/build
             IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:$IMAGE_TAG
-
-            echo "🔧 Creating ECR repo if missing..."
-            aws ecr describe-repositories --repository-names $REPO --region $REGION >/dev/null 2>&1 || \
-              aws ecr create-repository --repository-name $REPO --region $REGION
-
-            echo "🔐 Logging in to ECR..."
-            aws ecr get-login-password --region $REGION | sudo docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
-
-            echo "📦 Cloning repo and building Docker image..."
-            BUILD_DIR="/tmp/build-$IMAGE_TAG"
-            mkdir -p $BUILD_DIR
-            cd $BUILD_DIR
-            git clone https://github.com/${{ github.repository }} .
+            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
             sudo docker build -t $IMAGE_URI .
             sudo docker push $IMAGE_URI
 
-            echo $IMAGE_URI > ~/image_uri.txt
-            echo "✅ Docker image pushed: $IMAGE_URI"
-            rm -rf $BUILD_DIR
-          EOF
+            # Update Kubernetes deployment with new image
+            sed -i "s|image: .*|image: $IMAGE_URI|g" $DEPLOYMENT_FILE
 
-      - name: 🔍 Read New Image URI from EC2
-        run: |
-          IMAGE_URI=$(ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "cat ~/image_uri.txt")
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
-          echo "🖼️ New Docker image: $IMAGE_URI"
+            # Apply Kubernetes manifests
+            kubectl apply -f $DEPLOYMENT_FILE
+            kubectl apply -f $SERVICE_FILE
 
-      - name: 📝 Update Kubernetes Deployment YAML
-        run: |
-          sed -i "s|image: .*|image: $IMAGE_URI|g" ${{ env.DEPLOYMENT_FILE }}
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions@github.com"
-          git add ${{ env.DEPLOYMENT_FILE }}
-          git commit -m "🔄 Updated image to $IMAGE_URI" || echo "No changes to commit"
-          git push
-
-      - name: ⚙️ Apply Deployment to Kubernetes via EC2
-        run: |
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'EOF'
-            set -e
-            echo "🚀 Deploying to Kubernetes cluster..."
-            kubectl apply -f ~/Google-shopping-cicd/k8s/deployment.yml
-            kubectl apply -f ~/Google-shopping-cicd/k8s/service.yml
-            echo "✅ Kubernetes deployment completed!"
+            echo "✅ Deployment completed successfully"
           EOF
