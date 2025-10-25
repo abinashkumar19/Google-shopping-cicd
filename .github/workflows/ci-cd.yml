@@ -21,7 +21,7 @@ jobs:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Set up AWS CLI
+      - name: ⚙️ Configure AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -38,8 +38,8 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
-
-          echo "🧩 Image URI: $IMAGE_URI"
+          
+          echo "🖼 Image URI: $IMAGE_URI"
 
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
@@ -56,51 +56,51 @@ jobs:
           GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
         run: |
           echo "📤 Copying image URI file to EC2..."
-          ssh -o StrictHostKeyChecking=no -i ec2-key.pem $EC2_USER@$EC2_HOST "mkdir -p $APP_DIR"
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:$APP_DIR/
+          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
 
           echo "💻 Connecting to EC2..."
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
             set -e
             echo "✅ Connected to EC2 instance"
 
-            IMAGE_URI=\$(cat $APP_DIR/image_uri.txt)
-            echo "🖼  Using image: \$IMAGE_URI"
+            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
+            echo "🖼 Using image: \$IMAGE_URI"
 
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "📦 Cloning application repository..."
-              git clone https://\$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git $APP_DIR
+            APP_DIR="${APP_DIR}"
+            DEPLOY_FILE="\$APP_DIR/$DEPLOYMENT_FILE"
+            SERVICE_FILE="\$APP_DIR/$SERVICE_FILE"
+
+            mkdir -p \$APP_DIR
+
+            if [ ! -d "\$APP_DIR/.git" ]; then
+              echo "📦 Cloning repository..."
+              git clone https://\$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
             else
               echo "🔄 Pulling latest changes..."
-              cd $APP_DIR && git pull origin main
+              cd \$APP_DIR
+              git pull origin main
             fi
 
-            cd $APP_DIR
+            cd \$APP_DIR
 
-            # Update deployment YAML with new image
-            DEPLOY_FILE="$APP_DIR/$DEPLOYMENT_FILE"
-            SERVICE_FILE="$APP_DIR/$SERVICE_FILE"
+            if ! command -v kubectl &> /dev/null; then
+              echo "⚙️ Installing kubectl..."
+              curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+              chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+            fi
 
             if [ ! -f "\$DEPLOY_FILE" ]; then
-              echo "❌ Deployment YAML not found! Checking structure..."
-              ls -R $APP_DIR
+              echo "❌ Deployment YAML not found!"
+              ls -R \$APP_DIR/k8s
               exit 1
             fi
 
-            echo "📝 Updating image in deployment YAML..."
+            echo "📝 Updating deployment image..."
             sed -i "s|image: .*|image: \$IMAGE_URI|g" \$DEPLOY_FILE
-
-            # Install kubectl if missing
-            if ! command -v kubectl &> /dev/null; then
-              echo "⚙️ Installing kubectl..."
-              curl -LO "https://dl.k8s.io/release/\$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-              chmod +x kubectl
-              sudo mv kubectl /usr/local/bin/
-            fi
 
             echo "⚙️ Applying Kubernetes manifests..."
             kubectl apply -f \$DEPLOY_FILE
             kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
 
             echo "🚀 Deployment completed successfully!"
-EOF
+          EOF
