@@ -1,7 +1,8 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: google-shopping-svc
+  name: google-shopping-service
+  namespace: default
 spec:
   selector:
     app: google-shopping
