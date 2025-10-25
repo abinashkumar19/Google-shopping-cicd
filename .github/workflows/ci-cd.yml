@@ -8,8 +8,8 @@ on:
 env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: google-shopping
-  DEPLOYMENT_FILE: k8s/deployment.yaml
-  SERVICE_FILE: k8s/service.yaml
+  DEPLOYMENT_FILE: k8s/deployment.yml   # fixed filename
+  SERVICE_FILE: k8s/service.yml         # fixed filename
   EC2_USER: ec2-user
   APP_DIR: /home/ec2-user/app
 
@@ -53,26 +53,24 @@ jobs:
       - name: 🚀 Deploy to EC2 and Apply Kubernetes
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
-          GH_PAT: ${{ secrets.GH_PAT }}
-          GITHUB_USERNAME: abinashkumar19
-          GITHUB_REPO: Google-shopping-cicd
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
         run: |
           echo "📤 Copying image URI file to EC2..."
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
+          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:$APP_DIR/
 
           echo "💻 Connecting to EC2..."
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
             set -e
             echo "✅ Connected to EC2 instance"
 
-            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
+            IMAGE_URI=$(cat $APP_DIR/image_uri.txt)
             echo "🖼  Using image: \$IMAGE_URI"
 
             mkdir -p $APP_DIR
 
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "📦 Cloning application repository with PAT..."
-              git clone https://${GITHUB_USERNAME}:${GH_PAT}@github.com/${GITHUB_USERNAME}/${GITHUB_REPO}.git $APP_DIR
+              git clone https://$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git $APP_DIR
             else
               echo "🔄 Pulling latest changes..."
               cd $APP_DIR && git pull origin main
@@ -83,25 +81,19 @@ jobs:
             echo "🧪 Checking if kubectl exists..."
             if ! command -v kubectl &> /dev/null; then
               echo "⚙️ Installing kubectl..."
-              curl -LO "https://dl.k8s.io/release/\$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+              curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
               chmod +x kubectl && sudo mv kubectl /usr/local/bin/
             fi
 
-            DEPLOY_FILE="$APP_DIR/k8s/deployment.yaml"
-            SERVICE_FILE="$APP_DIR/k8s/service.yaml"
-
-            if [ ! -f "\$DEPLOY_FILE" ]; then
-              echo "❌ Deployment YAML not found!"
-              ls -R $APP_DIR
-              exit 1
-            fi
+            DEPLOY_FILE="$APP_DIR/k8s/deployment.yml"
+            SERVICE_FILE="$APP_DIR/k8s/service.yml"
 
             echo "📝 Updating image in deployment YAML..."
-            sed -i "s|image: .*|image: \$IMAGE_URI|g" \$DEPLOY_FILE
+            sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOY_FILE
 
             echo "⚙️ Applying Kubernetes manifests..."
-            kubectl apply -f \$DEPLOY_FILE
-            kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
+            kubectl apply -f $DEPLOY_FILE
+            kubectl apply -f $SERVICE_FILE || echo "⚠️ Service file missing, skipped."
 
             echo "🚀 Deployment completed successfully!"
           EOF
