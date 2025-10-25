@@ -72,3 +72,4 @@ jobs:
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
           kubectl apply -f kubernetes/deployment.yml
           kubectl apply -f kubernetes/service.yml
+          
