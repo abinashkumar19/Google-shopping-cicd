@@ -1,4 +1,4 @@
-name: CI/CD to EC2 + ECR + Kubernetes
+name: CI/CD to ECR + Kubernetes
 
 on:
   push:
@@ -20,17 +20,17 @@ jobs:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Set up AWS CLI
+      - name: ⚙️ Configure AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔑 Decode and save SSH key
+      - name: 🔑 Decode SSH key
         run: |
           echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
-          chmod 700 ec2-key.pem
+          chmod 600 ec2-key.pem
 
       - name: 🐳 Build & Push Docker image to ECR
         run: |
@@ -40,71 +40,61 @@ jobs:
 
           echo "🧩 Image URI: $IMAGE_URI"
 
+          # Ensure repo exists
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
 
+          # Build & push
           docker build -t $IMAGE_URI .
           aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
           docker push $IMAGE_URI
 
+          # Save for EC2
           echo $IMAGE_URI > image_uri.txt
 
-      - name: 🚀 Deploy to EC2 and Apply Kubernetes
+      - name: 🚀 Update Git & Deploy to Kubernetes
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
         run: |
-          echo "📤 Copying image URI file to EC2..."
+          echo "📤 Copying image URI to EC2..."
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
 
-          echo "💻 Connecting to EC2..."
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
+          echo "💻 Connecting to EC2 to deploy..."
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
             set -e
             echo "✅ Connected to EC2 instance"
 
-            IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼  Using image: $IMAGE_URI"
+            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
+            echo "🖼  Using image: \$IMAGE_URI"
 
             APP_DIR="/home/ec2-user/app"
-            DEPLOY_FILE="$APP_DIR/k8s/deployment.yml"
-            SERVICE_FILE="$APP_DIR/k8s/service.yml"
+            DEPLOY_FILE="\$APP_DIR/k8s/deployment.yml"
+            SERVICE_FILE="\$APP_DIR/k8s/service.yml"
 
-            mkdir -p $APP_DIR
+            mkdir -p \$APP_DIR
 
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "📦 Cloning application repository..."
-              git clone https://github.com/abinashkumar19/Google-shopping-cicd.git $APP_DIR
-            fi
-
-            cd $APP_DIR
-
-            echo "🔄 Resetting local changes and pulling latest from GitHub..."
-            git fetch origin main
-            git reset --hard origin/main
-
-            echo "📝 Updating deployment image..."
-            if [ -f "$DEPLOY_FILE" ]; then
-              sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOY_FILE
+            # Clone or pull the repo
+            if [ ! -d "\$APP_DIR/.git" ]; then
+              echo "📦 Cloning repo..."
+              git clone https://\$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
             else
-              echo "❌ Deployment YAML not found!"
-              ls -R $APP_DIR
-              exit 1
+              echo "🔄 Pulling latest changes..."
+              cd \$APP_DIR && git pull origin main
             fi
 
-            echo "⚙️ Applying Kubernetes manifests..."
-            if command -v kubectl &> /dev/null; then
-              kubectl apply -f $DEPLOY_FILE
-              if [ -f "$SERVICE_FILE" ]; then
-                kubectl apply -f $SERVICE_FILE
-              else
-                echo "⚠️ Service file missing, skipped."
-              fi
-            else
-              echo "⚠️ kubectl not installed. Installing..."
-              curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-              chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-              kubectl apply -f $DEPLOY_FILE
-              [ -f "$SERVICE_FILE" ] && kubectl apply -f $SERVICE_FILE
-            fi
+            cd \$APP_DIR
+
+            # Update deployment image
+            sed -i "s|image: .*|image: \$IMAGE_URI|g" \$DEPLOY_FILE
+
+            # Ensure kubectl config exists (for EKS)
+            mkdir -p ~/.kube
+            aws eks update-kubeconfig --region $AWS_REGION --name <YOUR_EKS_CLUSTER_NAME>
+
+            # Apply manifests
+            kubectl apply -f \$DEPLOY_FILE
+            kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
 
             echo "🚀 Deployment completed successfully!"
           EOF
