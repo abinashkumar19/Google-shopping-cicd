@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: earbuds-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: earbuds
+  template:
+    metadata:
+      labels:
+        app: earbuds
+    spec:
+      containers:
+        - name: earbuds
+          image: <IMAGE_URI>
+          ports:
+            - containerPort: 80
