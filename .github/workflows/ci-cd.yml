@@ -47,6 +47,23 @@ jobs:
 
           echo $IMAGE_URI > image_uri.txt
 
+      - name: 🔄 Update deployment YAMLs in Git and push
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          echo "📝 Updating images in all deployment YAMLs..."
+          for deploy_file in k8s/*-deployment.yml; do
+            [ -f "$deploy_file" ] && sed -i "s|image: .*|image: ${IMAGE_URI}|g" "$deploy_file"
+          done
+
+          echo "💾 Committing updated deployment YAMLs..."
+          git add k8s/*-deployment.yml
+          git commit -m "Update Docker image to $IMAGE_URI [ci skip]" || echo "No changes to commit"
+          git push https://$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git HEAD:main
+
       - name: 🚀 Deploy to EC2 and Apply Kubernetes
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -67,7 +84,7 @@ jobs:
 
             if [ ! -d "\$APP_DIR/.git" ]; then
               echo "📦 Cloning application repository..."
-              git clone https://github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
+              git clone https://$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
             else
               echo "🔄 Resetting local repo to match remote..."
               cd \$APP_DIR
@@ -78,24 +95,19 @@ jobs:
 
             cd \$APP_DIR
 
-            echo "📝 Updating images in deployments..."
-            for deploy_file in *-deployment.yml; do
-              [ -f "\$deploy_file" ] && sed -i "s|image: .*|image: \${IMAGE_URI}|g" "\$deploy_file"
-            done
-
             echo "⚙️ Configuring kubectl for EKS..."
             aws eks update-kubeconfig --region ca-central-1 --name kube
 
             echo "⚙️ Applying Kubernetes manifests..."
-            for deploy_file in *-deployment.yml; do
+            for deploy_file in k8s/*-deployment.yml; do
               [ -f "\$deploy_file" ] && kubectl apply -f "\$deploy_file"
             done
 
-            for svc_file in *-service.yml; do
+            for svc_file in k8s/*-service.yml; do
               [ -f "\$svc_file" ] && kubectl apply -f "\$svc_file"
             done
 
-            for hpa_file in *-hpa.yml; do
+            for hpa_file in k8s/*-hpa.yml; do
               [ -f "\$hpa_file" ] && kubectl apply -f "\$hpa_file"
             done
 
