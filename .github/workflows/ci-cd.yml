@@ -11,6 +11,8 @@ env:
   DEPLOYMENT_FILE: k8s/deployment.yaml
   SERVICE_FILE: k8s/service.yaml
   EC2_USER: ec2-user
+  GITHUB_USERNAME: abinashkumar19
+  GITHUB_REPO: Google-shopping-cicd
 
 jobs:
   deploy:
@@ -52,6 +54,7 @@ jobs:
       - name: 🚀 Deploy to EC2 and Apply Kubernetes
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           echo "📤 Copying image URI file to EC2..."
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
@@ -71,8 +74,8 @@ jobs:
             mkdir -p \$APP_DIR
 
             if [ ! -d "\$APP_DIR/.git" ]; then
-              echo "📦 Cloning application repository..."
-              git clone https://github.com/abinashkumar/Google-shopping-cicd.git \$APP_DIR
+              echo "📦 Cloning application repository with PAT..."
+              git clone https://${GITHUB_USERNAME}:${GH_PAT}@github.com/${GITHUB_USERNAME}/${GITHUB_REPO}.git \$APP_DIR
             else
               echo "🔄 Pulling latest changes..."
               cd \$APP_DIR && git pull origin main
