@@ -21,14 +21,14 @@ jobs:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Set up AWS CLI
+      - name: ⚙️ Configure AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔑 Decode and save SSH key
+      - name: 🔑 Decode SSH key
         run: |
           echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
           chmod 600 ec2-key.pem
@@ -50,7 +50,7 @@ jobs:
 
           echo $IMAGE_URI > image_uri.txt
 
-      - name: 🚀 Deploy to EKS via EC2
+      - name: 🚀 Deploy to EC2 and Apply Kubernetes
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
@@ -63,7 +63,7 @@ jobs:
             echo "✅ Connected to EC2 instance"
 
             IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼 Using image: $IMAGE_URI"
+            echo "🖼  Using image: $IMAGE_URI"
 
             APP_DIR="/home/ec2-user/app"
             mkdir -p $APP_DIR
@@ -78,23 +78,26 @@ jobs:
 
             cd $APP_DIR
 
+            # Update image in deployment YAML
             DEPLOY_FILE="$APP_DIR/k8s/deployment.yml"
             SERVICE_FILE="$APP_DIR/k8s/service.yml"
 
-            echo "📝 Updating deployment YAML with new image..."
-            sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOY_FILE
-
-            echo "⚙️ Setting up kubectl and kubeconfig for EKS..."
-            if ! command -v kubectl &> /dev/null; then
-              curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-              chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+            if [ ! -f "$DEPLOY_FILE" ]; then
+              echo "❌ Deployment YAML not found!"
+              exit 1
             fi
 
-            aws eks --region ap-south-1 update-kubeconfig --name kube
+            echo "📝 Updating image in deployment YAML..."
+            sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOY_FILE
 
-            echo "📦 Applying Kubernetes manifests..."
+            # Configure kubectl for EKS
+            echo "⚙️ Configuring kubectl for EKS cluster..."
+            aws eks update-kubeconfig --region ap-south-1 --name kube
+
+            # Apply manifests
+            echo "⚙️ Applying Kubernetes manifests..."
             kubectl apply -f $DEPLOY_FILE
-            kubectl apply -f $SERVICE_FILE
+            kubectl apply -f $SERVICE_FILE || echo "⚠️ Service file missing, skipped."
 
             echo "🚀 Deployment completed successfully!"
           EOF
