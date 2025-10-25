@@ -1,27 +1,29 @@
-name: CI-CD Pipeline
+name: CI/CD Pipeline for Google Shopping App
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+  workflow_dispatch:
 
 env:
   AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: 123456789012
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   ECR_REPOSITORY: google-shopping-repo
-  EC2_USER: ec2-user
-  EC2_HOST: ec2-xx-xx-xx-xx.ap-south-1.compute.amazonaws.com
-  CLUSTER_NAME: abinash-cluster
+  CLUSTER_NAME: google-shopping-cluster
   DEPLOYMENT_FILE: k8s/deployment.yml
+  EC2_USER: ${{ secrets.EC2_USER }}
+  EC2_HOST: ${{ secrets.EC2_HOST }}
 
 jobs:
-  deploy:
+  build-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧾 Checkout Code
+      - name: 🧩 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🔑 Setup SSH Key
+      - name: 🔑 Setup SSH Key for EC2
         run: |
           echo "${{ secrets.EC2_SSH_KEY }}" > ec2-key.pem
           chmod 600 ec2-key.pem
@@ -30,6 +32,7 @@ jobs:
         run: |
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'EOF'
             set -e
+            echo "✅ Connected to EC2..."
             sudo yum install -y docker awscli git || true
             sudo service docker start
 
@@ -39,40 +42,56 @@ jobs:
             IMAGE_TAG=$(date +%Y%m%d%H%M%S)
             IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:$IMAGE_TAG
 
+            echo "🔧 Creating ECR repo if missing..."
             aws ecr describe-repositories --repository-names $REPO --region $REGION >/dev/null 2>&1 || \
               aws ecr create-repository --repository-name $REPO --region $REGION
 
+            echo "🔐 Logging in to ECR..."
             aws ecr get-login-password --region $REGION | sudo docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
 
+            echo "📦 Creating clean temp directory..."
             BUILD_DIR="/tmp/build-$IMAGE_TAG"
             mkdir -p $BUILD_DIR
             cd $BUILD_DIR
+
+            echo "📥 Cloning repo..."
             git clone https://github.com/${{ github.repository }} .
+            
+            echo "🛠️ Building Docker image..."
             sudo docker build -t $IMAGE_URI .
             sudo docker push $IMAGE_URI
 
             echo $IMAGE_URI > ~/image_uri.txt
+            echo "✅ Pushed $IMAGE_URI"
+
+            echo "🧹 Cleaning up..."
             rm -rf $BUILD_DIR
           EOF
 
-      - name: 🔄 Fetch new ECR Image URI
+      - name: 🔍 Verify SSH Access and Read New Image URI
         run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > ec2-key.pem
+          chmod 600 ec2-key.pem
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "echo '✅ SSH OK'"
           IMAGE_URI=$(ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "cat ~/image_uri.txt")
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "🖼️ New image: $IMAGE_URI"
 
-      - name: 🧩 Update Deployment YAML
+      - name: 📝 Update Kubernetes Deployment YAML
         run: |
-          sed -i "s|<ECR_IMAGE_URI>|${{ env.IMAGE_URI }}|g" ${{ env.DEPLOYMENT_FILE }}
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+          sed -i "s|image: .*|image: $IMAGE_URI|g" ${{ env.DEPLOYMENT_FILE }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions@github.com"
           git add ${{ env.DEPLOYMENT_FILE }}
-          git commit -m "🔄 Update image to ${{ env.IMAGE_URI }}" || echo "No changes to commit"
+          git commit -m "🔄 Updated image to $IMAGE_URI" || echo "No changes to commit"
           git push
 
-      - name: ☸️ Apply on Kubernetes (via EC2)
+      - name: ⚙️ Apply Deployment to Kubernetes via EC2
         run: |
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'EOF'
-            aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+            set -e
+            echo "🚀 Deploying to Kubernetes cluster..."
             kubectl apply -f ~/Google-shopping-cicd/k8s/deployment.yml
             kubectl apply -f ~/Google-shopping-cicd/k8s/service.yml
+            echo "✅ Deployment completed!"
           EOF
