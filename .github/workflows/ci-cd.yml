@@ -10,7 +10,7 @@ env:
   ECR_REPOSITORY: google-shopping
   DEPLOYMENT_FILE: k8s/deployment.yml
   SERVICE_FILE: k8s/service.yml
-  EC2_USER: ec2-user
+  KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }} # base64-encoded kubeconfig
 
 jobs:
   deploy:
@@ -27,12 +27,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔑 Decode SSH key
+      - name: 🔑 Decode and save kubeconfig
         run: |
-          echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
-          chmod 600 ec2-key.pem
+          echo "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
 
-      - name: 🐳 Build & Push Docker image to ECR
+      - name: 🐳 Build & Push Docker Image to ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
@@ -40,61 +40,24 @@ jobs:
 
           echo "🧩 Image URI: $IMAGE_URI"
 
-          # Ensure repo exists
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
 
-          # Build & push
           docker build -t $IMAGE_URI .
           aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
           docker push $IMAGE_URI
 
-          # Save for EC2
           echo $IMAGE_URI > image_uri.txt
+          echo "✅ Docker image pushed: $IMAGE_URI"
 
-      - name: 🚀 Update Git & Deploy to Kubernetes
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+      - name: 📝 Update deployment YAML
         run: |
-          echo "📤 Copying image URI to EC2..."
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
+          IMAGE_URI=$(cat image_uri.txt)
+          echo "🖼 Updating deployment with image $IMAGE_URI"
+          sed -i "s|image: .*|image: $IMAGE_URI|g" $DEPLOYMENT_FILE
 
-          echo "💻 Connecting to EC2 to deploy..."
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
-            set -e
-            echo "✅ Connected to EC2 instance"
-
-            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼  Using image: \$IMAGE_URI"
-
-            APP_DIR="/home/ec2-user/app"
-            DEPLOY_FILE="\$APP_DIR/k8s/deployment.yml"
-            SERVICE_FILE="\$APP_DIR/k8s/service.yml"
-
-            mkdir -p \$APP_DIR
-
-            # Clone or pull the repo
-            if [ ! -d "\$APP_DIR/.git" ]; then
-              echo "📦 Cloning repo..."
-              git clone https://\$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
-            else
-              echo "🔄 Pulling latest changes..."
-              cd \$APP_DIR && git pull origin main
-            fi
-
-            cd \$APP_DIR
-
-            # Update deployment image
-            sed -i "s|image: .*|image: \$IMAGE_URI|g" \$DEPLOY_FILE
-
-            # Ensure kubectl config exists (for EKS)
-            mkdir -p ~/.kube
-            aws eks update-kubeconfig --region $AWS_REGION --name <YOUR_EKS_CLUSTER_NAME>
-
-            # Apply manifests
-            kubectl apply -f \$DEPLOY_FILE
-            kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
-
-            echo "🚀 Deployment completed successfully!"
-          EOF
+      - name: 🚀 Apply Kubernetes manifests
+        run: |
+          kubectl apply -f $DEPLOYMENT_FILE
+          kubectl apply -f $SERVICE_FILE
+          echo "🎉 Kubernetes deployment & service applied successfully!"
