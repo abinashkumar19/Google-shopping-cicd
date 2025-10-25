@@ -8,8 +8,6 @@ on:
 env:
   AWS_REGION: ca-central-1
   ECR_REPOSITORY: google-shopping
-  DEPLOYMENT_FILE: k8s/deployment.yml
-  SERVICE_FILE: k8s/service.yml
   EC2_USER: ec2-user
 
 jobs:
@@ -62,33 +60,44 @@ jobs:
             echo "✅ Connected to EC2 instance"
 
             IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼  Using image: \$IMAGE_URI"
+            echo "🖼 Using image: \$IMAGE_URI"
 
             APP_DIR="/home/ec2-user/app"
-            DEPLOY_FILE="\$APP_DIR/k8s/deployment.yml"
-            SERVICE_FILE="\$APP_DIR/k8s/service.yml"
-
             mkdir -p \$APP_DIR
 
             if [ ! -d "\$APP_DIR/.git" ]; then
               echo "📦 Cloning application repository..."
               git clone https://github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
             else
-              echo "🔄 Pulling latest changes..."
-              cd \$APP_DIR && git reset --hard && git clean -fd && git pull origin main
+              echo "🔄 Resetting local repo to match remote..."
+              cd \$APP_DIR
+              git fetch origin
+              git reset --hard origin/main
+              git clean -fd
             fi
 
             cd \$APP_DIR
 
-            echo "📝 Updating deployment image..."
-            sed -i "s|image: .*|image: \${IMAGE_URI}|g" \$DEPLOY_FILE
+            echo "📝 Updating images in deployments..."
+            for deploy_file in *-deployment.yml; do
+              [ -f "\$deploy_file" ] && sed -i "s|image: .*|image: \${IMAGE_URI}|g" "\$deploy_file"
+            done
 
             echo "⚙️ Configuring kubectl for EKS..."
             aws eks update-kubeconfig --region ca-central-1 --name kube
 
             echo "⚙️ Applying Kubernetes manifests..."
-            kubectl apply -f \$DEPLOY_FILE
-            kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
+            for deploy_file in *-deployment.yml; do
+              [ -f "\$deploy_file" ] && kubectl apply -f "\$deploy_file"
+            done
+
+            for svc_file in *-service.yml; do
+              [ -f "\$svc_file" ] && kubectl apply -f "\$svc_file"
+            done
+
+            for hpa_file in *-hpa.yml; do
+              [ -f "\$hpa_file" ] && kubectl apply -f "\$hpa_file"
+            done
 
             echo "🚀 Deployment completed successfully!"
           EOF
