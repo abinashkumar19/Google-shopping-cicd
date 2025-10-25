@@ -6,12 +6,11 @@ on:
       - main
 
 env:
-  AWS_REGION: ca-central-1      # Correct region
+  AWS_REGION: ca-central-1
   ECR_REPOSITORY: google-shopping
   DEPLOYMENT_FILE: k8s/deployment.yml
   SERVICE_FILE: k8s/service.yml
   EC2_USER: ec2-user
-  EKS_CLUSTER_NAME: kube
 
 jobs:
   deploy:
@@ -58,11 +57,11 @@ jobs:
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
 
           echo "💻 Connecting to EC2..."
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
             set -e
             echo "✅ Connected to EC2 instance"
 
-            IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
+            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
             echo "🖼  Using image: \$IMAGE_URI"
 
             APP_DIR="/home/ec2-user/app"
