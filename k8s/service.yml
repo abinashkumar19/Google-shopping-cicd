@@ -3,9 +3,9 @@ kind: Service
 metadata:
   name: google-shopping-service
 spec:
+  type: LoadBalancer
   selector:
     app: google-shopping
-  type: LoadBalancer
   ports:
     - protocol: TCP
       port: 80
