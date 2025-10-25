@@ -2,11 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: google-shopping-deployment
-  namespace: default
   labels:
     app: google-shopping
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: google-shopping
@@ -17,14 +16,13 @@ spec:
     spec:
       containers:
         - name: google-shopping-container
-          image: REPLACE_WITH_IMAGE_URI
+          image: placeholder-image # This will be replaced automatically by the CI/CD workflow
           ports:
             - containerPort: 80
           resources:
             limits:
-              memory: "512Mi"
+              memory: "256Mi"
               cpu: "500m"
             requests:
-              memory: "256Mi"
+              memory: "128Mi"
               cpu: "250m"
-          imagePullPolicy: Always
