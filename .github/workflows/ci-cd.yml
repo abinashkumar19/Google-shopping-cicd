@@ -8,8 +8,6 @@ on:
 env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: google-shopping
-  DEPLOYMENT_FILE: k8s/deployment.yaml
-  SERVICE_FILE: k8s/service.yaml
   EC2_USER: ec2-user
 
 jobs:
@@ -41,7 +39,7 @@ jobs:
 
           echo "🔹 Building image: $IMAGE_URI"
 
-          # Create ECR repo if it doesn't exist
+          # Create ECR repo if not present
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
 
@@ -53,9 +51,9 @@ jobs:
           echo $IMAGE_URI > image_uri.txt
           cat image_uri.txt
 
-      - name: 🚀 Deploy to EC2 and Apply Kubernetes Manifests
+      - name: 🚀 Deploy to EC2 and Apply Kubernetes
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}   # ✅ Load EC2 host from GitHub Secrets
+          EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
           echo "📤 Copying image URI file to EC2..."
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
@@ -64,30 +62,41 @@ jobs:
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
             set -e
             echo "✅ Connected to EC2 instance"
-            
+
             IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
             echo "🖼  Using image: \$IMAGE_URI"
 
-            # Clone or update app repo
-            if [ ! -d "/home/ec2-user/app" ]; then
-              echo "📦 Cloning app repository..."
-              git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git /home/ec2-user/app
+            APP_DIR="/home/ec2-user/app"
+            DEPLOY_FILE="\$APP_DIR/k8s/deployment.yaml"
+            SERVICE_FILE="\$APP_DIR/k8s/service.yaml"
+
+            # Ensure app directory exists
+            mkdir -p \$APP_DIR
+
+            # Clone or pull repo
+            if [ ! -d "\$APP_DIR/.git" ]; then
+              echo "📦 Cloning application repository..."
+              git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git \$APP_DIR
             else
-              echo "🔄 Updating existing repository..."
-              cd /home/ec2-user/app
-              git pull origin main
+              echo "🔄 Pulling latest changes..."
+              cd \$APP_DIR && git pull origin main
             fi
 
-            cd /home/ec2-user/app
+            # Check for deployment file
+            if [ ! -f "\$DEPLOY_FILE" ]; then
+              echo "❌ Deployment YAML not found! Checking current directory..."
+              ls -R \$APP_DIR
+              exit 1
+            fi
 
-            # Update image in deployment file
+            # Update image in deployment YAML
             echo "📝 Updating image in deployment YAML..."
-            sed -i "s|image: .*|image: \${IMAGE_URI}|g" \$DEPLOYMENT_FILE
+            sed -i "s|image: .*|image: \${IMAGE_URI}|g" \$DEPLOY_FILE
 
-            # Apply Kubernetes manifests
+            # Apply to Kubernetes
             echo "⚙️ Applying Kubernetes manifests..."
-            kubectl apply -f \$DEPLOYMENT_FILE
-            kubectl apply -f \$SERVICE_FILE
+            kubectl apply -f \$DEPLOY_FILE
+            kubectl apply -f \$SERVICE_FILE || echo "⚠️ Service file missing, skipped."
 
             echo "🚀 Deployment completed successfully!"
           EOF
