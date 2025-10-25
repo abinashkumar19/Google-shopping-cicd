@@ -47,50 +47,57 @@ jobs:
 
           echo $IMAGE_URI > image_uri.txt
 
-      - name: 🚀 Deploy to EC2 and Apply Kubernetes
+      - name: 🚀 Update Kubernetes YAMLs and Deploy
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "📤 Copying image URI file to EC2..."
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
-
           echo "💻 Connecting to EC2..."
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
             set -e
             echo "✅ Connected to EC2 instance"
 
-            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼 Using image: \$IMAGE_URI"
-
             APP_DIR="/home/ec2-user/app"
             DEPLOY_DIR="\$APP_DIR/k8s"
+            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
 
             mkdir -p \$APP_DIR
 
             if [ ! -d "\$APP_DIR/.git" ]; then
-              echo "📦 Cloning application repository..."
+              echo "📦 Cloning repository..."
               git clone https://github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
             else
-              echo "🔄 Pulling latest changes..."
-              cd \$APP_DIR && git reset --hard && git clean -fd && git pull origin main
+              cd \$APP_DIR
+              git reset --hard
+              git clean -fd
+              git pull origin main
             fi
 
             cd \$DEPLOY_DIR
 
-            echo "📝 Updating images in all deployment YAMLs..."
+            echo "📝 Updating images in deployment YAMLs..."
             for deploy_file in *-deployment.yml; do
-              echo "Updating image in \$deploy_file"
+              echo "Updating \$deploy_file..."
               sed -i "s|image: .*|image: \$IMAGE_URI|g" \$deploy_file
             done
 
-            echo "⚙️ Configuring kubectl for EKS..."
+            echo "⚙️ Commit updated YAMLs to GitHub..."
+            cd \$APP_DIR
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git add k8s/*-deployment.yml
+            git commit -m "ci: update deployment images to \$IMAGE_URI" || echo "No changes to commit"
+            git push https://\$GITHUB_TOKEN@github.com/abinashkumar19/Google-shopping-cicd.git main
+
+            echo "⚙️ Configuring kubectl..."
             aws eks update-kubeconfig --region ca-central-1 --name kube
 
-            echo "⚙️ Applying all Kubernetes manifests (deployments, services, HPAs)..."
+            echo "⚙️ Applying all Kubernetes manifests..."
+            cd \$DEPLOY_DIR
             for yaml_file in *-deployment.yml *-service.yml *-hpa.yml; do
               echo "Applying \$yaml_file..."
               kubectl apply -f \$yaml_file || echo "⚠️ Failed to apply \$yaml_file"
             done
 
-            echo "🚀 Deployment completed successfully!"
+            echo "🚀 Deployment completed!"
           EOF
