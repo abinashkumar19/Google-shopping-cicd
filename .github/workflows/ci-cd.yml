@@ -11,7 +11,7 @@ env:
   DEPLOYMENT_FILE: k8s/deployment.yaml
   SERVICE_FILE: k8s/service.yaml
   EC2_USER: ec2-user
-  EC2_HOST: ec2-xx-xx-xx-xx.ap-south-1.compute.amazonaws.com
+  EC2_HOST: ec2-16-52-161-62.ap-south-1.compute.amazonaws.com   # ✅ Fixed line
 
 jobs:
   deploy:
@@ -39,9 +39,11 @@ jobs:
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
+          # Create repo if missing
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
 
+          # Build and push Docker image
           docker build -t $IMAGE_URI .
           aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
           docker push $IMAGE_URI
@@ -50,17 +52,29 @@ jobs:
 
       - name: SSH to EC2 and Deploy
         run: |
+          echo "📤 Copying image URI to EC2..."
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
+
+          echo "💻 Connecting to EC2 and deploying..."
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
             set -e
             echo "✅ Connected to EC2 instance"
+
             IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
 
-            cd /home/ec2-user/app || git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git app && cd app
+            # Ensure app directory exists
+            if [ ! -d "/home/ec2-user/app" ]; then
+              git clone https://github.com/<YOUR_GITHUB_USERNAME>/Google-shopping-cicd.git /home/ec2-user/app
+            fi
 
+            cd /home/ec2-user/app
+
+            # Update Kubernetes manifest with new image
             sed -i "s|image: .*|image: ${IMAGE_URI}|g" $DEPLOYMENT_FILE
 
+            # Apply manifests
             kubectl apply -f $DEPLOYMENT_FILE
             kubectl apply -f $SERVICE_FILE
+
             echo "🚀 Deployment complete"
           EOF
