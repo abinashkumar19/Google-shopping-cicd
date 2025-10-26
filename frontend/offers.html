@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Offers — ShopDemo</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand"><div class="logo">G</div><div class="title">ShopDemo</div></div>
+    <nav class="top-nav">
+      <a href="index.html">Home</a>
+      <a href="phones.html">Phones</a>
+      <a href="earbuds.html">Earbuds</a>
+      <a href="watches.html">Watches</a>
+      <a href="accessories.html">Accessories</a>
+      <a href="offers.html" class="active">Offers</a>
+    </nav>
+    <div class="cart-btn" id="cartCountBtn">Cart (0)</div>
+  </header>
+
+  <main class="container">
+    <h1>Offers</h1>
+    <section class="products-grid" id="productsGrid"></section>
+  </main>
+
+  <div id="cartModal" class="cart-modal hidden">
+    <div class="cart-inner">
+      <h3>Your cart</h3>
+      <div id="cartItems"></div>
+      <div class="cart-total">Total: $<span id="cartTotal">0</span></div>
+      <div style="display:flex;gap:8px">
+        <button id="checkoutBtn" class="btn">Checkout</button>
+        <button id="closeCartBtn" class="btn outline">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const PRODUCTS = [
+      { id: 'o1', title: 'iPhone 15 — Sale', price: 949, desc: 'Limited-time discount', img: '' },
+      { id: 'o2', title: 'AirPods Pro — Deal', price: 219, desc: 'Save on earbuds', img: '' },
+      { id: 'o3', title: 'Bundle: Phone + Case', price: 1029, desc: 'Discounted bundle', img: '' }
+    ];
+
+    document.addEventListener('DOMContentLoaded', ()=> {
+      renderProducts(PRODUCTS, document.getElementById('productsGrid'));
+    });
+  </script>
+</body>
+</html>
