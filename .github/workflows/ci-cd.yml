@@ -1,4 +1,4 @@
-name: CI/CD to ECR + EKS with Auto YML Update
+name: CI/CD to ECR + EKS (Auto Update & Deploy)
 
 on:
   push:
@@ -9,7 +9,6 @@ env:
   AWS_REGION: ca-central-1
   ECR_REPOSITORY: google-shopping
   EC2_USER: ec2-user
-  APP_DIR: /home/ec2-user/app
   K8S_DIR: k8s
 
 jobs:
@@ -20,7 +19,7 @@ jobs:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_PAT }} # Personal Access Token with repo permissions
+          token: ${{ secrets.GH_PAT }} # ✅ PAT required for git push
 
       - name: ⚙️ Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -53,27 +52,33 @@ jobs:
       - name: 📝 Update all K8s YAMLs with new image URI
         run: |
           echo "🔄 Updating all deployment YAML files..."
-          for deploy_file in k8s/*-deployment.yml; do
+          for deploy_file in ${K8S_DIR}/*-deployment.yml; do
             echo "Updating $deploy_file..."
             sed -i "s|image: .*|image: ${IMAGE_URI}|g" "$deploy_file"
           done
 
-          echo "✅ YAMLs updated successfully."
+          echo "✅ All deployment YAML files updated."
 
       - name: 💾 Commit and Push Updated YAMLs
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "🧠 Configuring Git..."
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
           git add k8s/*-deployment.yml
-          git commit -m "🔄 Auto-update image URIs to ${IMAGE_URI}"
-          git push https://github.com/${{ github.repository }}.git HEAD:main
+          git commit -m "🔄 Auto-update image URIs to ${IMAGE_URI}" || echo "No changes to commit."
+
+          echo "🚀 Pushing changes to GitHub..."
+          git push https://abinashkumar19:${GH_PAT}@github.com/abinashkumar19/Google-shopping-cicd.git HEAD:main
 
       - name: 🚀 Deploy on EC2 and Apply Manifests
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
           echo "📤 Copying deployment files..."
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no -r k8s $EC2_USER@$EC2_HOST:$APP_DIR/
+          scp -i ec2-key.pem -o StrictHostKeyChecking=no -r ${K8S_DIR} $EC2_USER@$EC2_HOST:/home/ec2-user/app/
 
           echo "💻 Connecting to EC2 and deploying..."
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
@@ -84,8 +89,8 @@ jobs:
             echo "⚙️ Configuring kubectl for EKS..."
             aws eks update-kubeconfig --region ca-central-1 --name kube
 
-            echo "🚀 Applying Kubernetes manifests..."
+            echo "🚀 Applying all Kubernetes manifests..."
             kubectl apply -f .
 
-            echo "✅ All deployments and services applied successfully!"
+            echo "✅ All deployments, services, and ingress applied successfully!"
           EOF
