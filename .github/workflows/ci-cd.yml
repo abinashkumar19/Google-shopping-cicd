@@ -38,9 +38,11 @@ jobs:
 
           echo "🧩 Image URI: $IMAGE_URI"
 
+          # Create repo if it doesn't exist
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
-            aws ecr create-repository --repository-name $ECR_REPOSITORY
+          aws ecr create-repository --repository-name $ECR_REPOSITORY
 
+          # Build and push Docker image
           docker build -t $IMAGE_URI .
           aws ecr get-login-password --region $AWS_REGION | \
             docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
@@ -48,36 +50,28 @@ jobs:
 
           echo $IMAGE_URI > image_uri.txt
 
-      - name: 💾 Commit and Push Updated YAMLs
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+      - name: 💾 Update Deployment YAMLs
         run: |
           IMAGE_URI=$(cat image_uri.txt)
           echo "📝 Updating image in all deployment YAMLs..."
           for deploy_file in k8s/*-deployment.yml; do
-            [ -f "$deploy_file" ] || continue
             sed -i "s|image: .*|image: ${IMAGE_URI}|g" "$deploy_file"
           done
 
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions Bot"
-
-          git add k8s/*-deployment.yml || true
-          git commit -m "🔄 Auto-update image URI to ${IMAGE_URI}" || echo "No YAML changes to commit."
-
-          git push https://x-access-token:${GH_PAT}@github.com/abinashkumar19/Google-shopping-cicd.git HEAD:main || echo "⚠️ Push skipped."
-
-      - name: 🚀 Deploy to EC2 and Apply Kubernetes
+      - name: 🚀 Deploy to EC2 and Kubernetes
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
+          # Copy repo and image info to EC2
           scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
 
           ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
             set -e
+
             IMAGE_URI=$(cat /home/ec2-user/image_uri.txt)
             APP_DIR="/home/ec2-user/app"
 
+            # Clone or pull the repo
             mkdir -p $APP_DIR
             if [ ! -d "$APP_DIR/.git" ]; then
               git clone https://github.com/abinashkumar19/Google-shopping-cicd.git $APP_DIR
@@ -87,21 +81,16 @@ jobs:
 
             cd $APP_DIR/k8s
 
-            aws eks update-kubeconfig --region ca-central-1 --name kube
-
             # Update deployment images
             for deploy_file in *-deployment.yml; do
-              [ -f "$deploy_file" ] || continue
               sed -i "s|image: .*|image: ${IMAGE_URI}|g" "$deploy_file"
             done
 
-            # Safely apply all YAML/YML files if they exist
-            shopt -s nullglob
-            for file in *.yaml *.yml; do
-              echo "Applying $file..."
-              kubectl apply -f "$file"
-            done
-            shopt -u nullglob
+            # Ensure kubectl is configured
+            aws eks update-kubeconfig --region ca-central-1 --name kube
+
+            # Apply services, deployments, and ALB-ready Ingress
+            kubectl apply -f .
 
             echo "✅ Deployment complete!"
           EOF
