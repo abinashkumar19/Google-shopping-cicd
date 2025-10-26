@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ShopDemo — Home</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <div class="logo">G</div>
+      <div class="title">ShopDemo</div>
+    </div>
+    <nav class="top-nav">
+      <a href="index.html">Home</a>
+      <a href="phones.html">Phones</a>
+      <a href="earbuds.html">Earbuds</a>
+      <a href="watches.html">Watches</a>
+      <a href="accessories.html">Accessories</a>
+      <a href="offers.html">Offers</a>
+    </nav>
+    <div class="cart-btn" id="cartCountBtn">Cart (0)</div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Welcome to ShopDemo</h1>
+      <p>A small demo shopping frontend — browse categories and try the cart.</p>
+      <div class="hero-links">
+        <a class="btn" href="phones.html">Shop Phones</a>
+        <a class="btn outline" href="offers.html">See Offers</a>
+      </div>
+    </section>
+
+    <section class="cards-grid" id="homeCards">
+      <article class="card">
+        <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360'><rect width='100%' height='100%' fill='%23e8f0fe'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23333'>Phones</text></svg>" alt="">
+        <h3>Phones</h3>
+        <p>Latest smartphones from top brands.</p>
+        <a class="btn" href="phones.html">Browse</a>
+      </article>
+
+      <article class="card">
+        <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360'><rect width='100%' height='100%' fill='%23eef8f2'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23333'>Earbuds</text></svg>" alt="">
+        <h3>Earbuds</h3>
+        <p>Noise-cancelling, wireless, long battery.</p>
+        <a class="btn" href="earbuds.html">Browse</a>
+      </article>
+
+      <article class="card">
+        <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360'><rect width='100%' height='100%' fill='%23fff4e6'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23333'>Watches</text></svg>" alt="">
+        <h3>Watches & Trackers</h3>
+        <p>Health tracking and smartwatches.</p>
+        <a class="btn" href="watches.html">Browse</a>
+      </article>
+
+      <article class="card">
+        <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360'><rect width='100%' height='100%' fill='%23f0f7ff'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23333'>Accessories</text></svg>" alt="">
+        <h3>Accessories</h3>
+        <p>Cases, cables, chargers, and more.</p>
+        <a class="btn" href="accessories.html">Browse</a>
+      </article>
+
+      <article class="card">
+        <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360'><rect width='100%' height='100%' fill='%23fff0f6'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23333'>Offers</text></svg>" alt="">
+        <h3>Offers</h3>
+        <p>Discounts and bundle deals updated daily.</p>
+        <a class="btn outline" href="offers.html">See Offers</a>
+      </article>
+    </section>
+  </main>
+
+  <div id="cartModal" class="cart-modal hidden">
+    <div class="cart-inner">
+      <h3>Your cart</h3>
+      <div id="cartItems"></div>
+      <div class="cart-total">Total: $<span id="cartTotal">0</span></div>
+      <div style="display:flex;gap:8px">
+        <button id="checkoutBtn" class="btn">Checkout</button>
+        <button id="closeCartBtn" class="btn outline">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
