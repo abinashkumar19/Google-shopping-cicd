@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: accessories-service
+spec:
+  selector:
+    app: accessories
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
