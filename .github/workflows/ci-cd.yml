@@ -1,4 +1,4 @@
-name: CI/CD to EC2 + ECR + Kubernetes
+name: CI/CD to ECR + EKS with Auto YML Update
 
 on:
   push:
@@ -9,6 +9,8 @@ env:
   AWS_REGION: ca-central-1
   ECR_REPOSITORY: google-shopping
   EC2_USER: ec2-user
+  APP_DIR: /home/ec2-user/app
+  K8S_DIR: k8s
 
 jobs:
   deploy:
@@ -17,26 +19,29 @@ jobs:
     steps:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }} # Personal Access Token with repo permissions
 
-      - name: ⚙️ Set up AWS CLI
+      - name: ⚙️ Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔑 Decode and save SSH key
+      - name: 🔑 Decode and save EC2 SSH key
         run: |
           echo "${{ secrets.EC2_PEM_B64 }}" | base64 -d > ec2-key.pem
           chmod 600 ec2-key.pem
 
-      - name: 🐳 Build & Push Docker image to ECR
+      - name: 🐳 Build & Push Docker Image to ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-          echo "🧩 Image URI: $IMAGE_URI"
+          echo "🧩 IMAGE_URI: $IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
           aws ecr create-repository --repository-name $ECR_REPOSITORY
@@ -45,71 +50,42 @@ jobs:
           aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
           docker push $IMAGE_URI
 
-          echo $IMAGE_URI > image_uri.txt
-
-      - name: 🔄 Update deployment YAMLs in Git and push
-        env:
-          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+      - name: 📝 Update all K8s YAMLs with new image URI
         run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-
-          echo "📝 Updating images in all deployment YAMLs..."
+          echo "🔄 Updating all deployment YAML files..."
           for deploy_file in k8s/*-deployment.yml; do
-            [ -f "$deploy_file" ] && sed -i "s|image: .*|image: ${IMAGE_URI}|g" "$deploy_file"
+            echo "Updating $deploy_file..."
+            sed -i "s|image: .*|image: ${IMAGE_URI}|g" "$deploy_file"
           done
 
-          echo "💾 Committing updated deployment YAMLs..."
-          git add k8s/*-deployment.yml
-          git commit -m "Update Docker image to $IMAGE_URI [ci skip]" || echo "No changes to commit"
-          git push https://$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git HEAD:main
+          echo "✅ YAMLs updated successfully."
 
-      - name: 🚀 Deploy to EC2 and Apply Kubernetes
+      - name: 💾 Commit and Push Updated YAMLs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/*-deployment.yml
+          git commit -m "🔄 Auto-update image URIs to ${IMAGE_URI}"
+          git push https://github.com/${{ github.repository }}.git HEAD:main
+
+      - name: 🚀 Deploy on EC2 and Apply Manifests
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          echo "📤 Copying image URI file to EC2..."
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no image_uri.txt $EC2_USER@$EC2_HOST:/home/ec2-user/
+          echo "📤 Copying deployment files..."
+          scp -i ec2-key.pem -o StrictHostKeyChecking=no -r k8s $EC2_USER@$EC2_HOST:$APP_DIR/
 
-          echo "💻 Connecting to EC2..."
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOF
+          echo "💻 Connecting to EC2 and deploying..."
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
             set -e
-            echo "✅ Connected to EC2 instance"
-
-            IMAGE_URI=\$(cat /home/ec2-user/image_uri.txt)
-            echo "🖼 Using image: \$IMAGE_URI"
-
-            APP_DIR="/home/ec2-user/app"
-            mkdir -p \$APP_DIR
-
-            if [ ! -d "\$APP_DIR/.git" ]; then
-              echo "📦 Cloning application repository..."
-              git clone https://$GITHUB_PAT@github.com/abinashkumar19/Google-shopping-cicd.git \$APP_DIR
-            else
-              echo "🔄 Resetting local repo to match remote..."
-              cd \$APP_DIR
-              git fetch origin
-              git reset --hard origin/main
-              git clean -fd
-            fi
-
-            cd \$APP_DIR
+            echo "✅ Connected to EC2"
+            cd /home/ec2-user/app/k8s
 
             echo "⚙️ Configuring kubectl for EKS..."
             aws eks update-kubeconfig --region ca-central-1 --name kube
 
-            echo "⚙️ Applying Kubernetes manifests..."
-            for deploy_file in k8s/*-deployment.yml; do
-              [ -f "\$deploy_file" ] && kubectl apply -f "\$deploy_file"
-            done
+            echo "🚀 Applying Kubernetes manifests..."
+            kubectl apply -f .
 
-            for svc_file in k8s/*-service.yml; do
-              [ -f "\$svc_file" ] && kubectl apply -f "\$svc_file"
-            done
-
-            for hpa_file in k8s/*-hpa.yml; do
-              [ -f "\$hpa_file" ] && kubectl apply -f "\$hpa_file"
-            done
-
-            echo "🚀 Deployment completed successfully!"
+            echo "✅ All deployments and services applied successfully!"
           EOF
