@@ -1,0 +1,47 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopping-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: shopping.local
+    http:
+      paths:
+      - path: /phones
+        pathType: Prefix
+        backend:
+          service:
+            name: phones-service
+            port:
+              number: 80
+      - path: /earbuds
+        pathType: Prefix
+        backend:
+          service:
+            name: earbuds-service
+            port:
+              number: 80
+      - path: /watches
+        pathType: Prefix
+        backend:
+          service:
+            name: watches-service
+            port:
+              number: 80
+      - path: /accessories
+        pathType: Prefix
+        backend:
+          service:
+            name: accessories-service
+            port:
+              number: 80
+      - path: /offers
+        pathType: Prefix
+        backend:
+          service:
+            name: offers-service
+            port:
+              number: 80
