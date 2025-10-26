@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Earbuds — ShopDemo</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand"><div class="logo">G</div><div class="title">ShopDemo</div></div>
+    <nav class="top-nav">
+      <a href="index.html">Home</a>
+      <a href="phones.html">Phones</a>
+      <a href="earbuds.html" class="active">Earbuds</a>
+      <a href="watches.html">Watches</a>
+      <a href="accessories.html">Accessories</a>
+      <a href="offers.html">Offers</a>
+    </nav>
+    <div class="cart-btn" id="cartCountBtn">Cart (0)</div>
+  </header>
+
+  <main class="container">
+    <h1>Earbuds</h1>
+    <section class="products-grid" id="productsGrid"></section>
+  </main>
+
+  <div id="cartModal" class="cart-modal hidden">
+    <div class="cart-inner">
+      <h3>Your cart</h3>
+      <div id="cartItems"></div>
+      <div class="cart-total">Total: $<span id="cartTotal">0</span></div>
+      <div style="display:flex;gap:8px">
+        <button id="checkoutBtn" class="btn">Checkout</button>
+        <button id="closeCartBtn" class="btn outline">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const PRODUCTS = [
+      { id: 'e1', title: 'AirPods Pro', price: 249, desc: 'Active noise cancelling', img: '' },
+      { id: 'e2', title: 'Sony WF-1000XM4', price: 199, desc: 'Best noise reduction', img: '' },
+      { id: 'e3', title: 'Samsung Galaxy Buds2', price: 149, desc: 'Balanced sound', img: '' }
+    ];
+
+    document.addEventListener('DOMContentLoaded', ()=> {
+      renderProducts(PRODUCTS, document.getElementById('productsGrid'));
+    });
+  </script>
+</body>
+</html>
